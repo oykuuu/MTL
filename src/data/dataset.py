@@ -89,7 +89,7 @@ class CAPTCHA_MultiTask(Dataset):
 
         captcha_chars = {letter for captcha in all_labels for letter in captcha}
         self.encoder = self.encoder.fit(list(captcha_chars))
-        self.num_classes = len(all_labels)
+        self.num_classes = len(captcha_chars)
         self.num_tasks = len(all_labels[0])
 
     def get_num_tasks(self):
@@ -179,7 +179,7 @@ class CAPTCHA_SingleTask(Dataset):
 
         captcha_chars = {letter for captcha in all_labels for letter in captcha}
         self.encoder = self.encoder.fit(list(captcha_chars))
-        self.num_classes = len(all_labels)
+        self.num_classes = len(captcha_chars)
         self.num_tasks = len(all_labels[0])
 
     def get_num_tasks(self):

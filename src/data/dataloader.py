@@ -9,6 +9,46 @@ from torch.utils.data import DataLoader, random_split
 import data.dataset
 
 
+class CustomRandomCrop(object):
+    def __init__(self, output_width):
+        """Crop randomly the image in a sample. Crop only on the sides.
+
+        Parameters
+        ----------
+        output_width
+            int, Desired output width
+        """
+        assert isinstance(output_width, (int))
+        self.output_width = output_width
+
+    def __call__(self, image):
+        """ Crop from the right or left randomly. Sometimes skip
+        transform.
+
+        Parameters
+        ----------
+        image
+            PIL.Image, image to be transformed
+        Returns
+        -------
+        image
+            PIL.Image, transformed image
+        """
+        if np.random.random() > 0.5:
+            # half of the time skip transform
+            return image
+
+        w, h = image.size
+        crop_by = np.random.randint(0, w - self.output_width)
+        # crop from the left (right) half of the time
+        if np.random.random() > 0.5:
+            image = image.crop((crop_by, 0, w, h))
+        else:
+            image = image.crop((0, 0, w-crop_by, h))
+
+        return image
+
+
 def get_dataloaders(
     dataset: torch.utils.data.Dataset,
     batch_size: int,
@@ -57,9 +97,9 @@ def get_dataloaders(
     # establish train-val-test splits
     n_data = len(dataset)
     n_test = int(np.floor(test_split * n_data))
+    n_val = int(np.floor(val_split * n_data))
     train_val, test_dataset = random_split(dataset, [n_data - n_test, n_test])
 
-    n_val = int(np.floor(val_split * len(train_val)))
     train_dataset, val_dataset = random_split(train_val, [len(train_val) - n_val, n_val])
 
     # initialize all dataloaders

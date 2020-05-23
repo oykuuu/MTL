@@ -8,13 +8,15 @@ import time
 import argparse
 import numpy as np
 import cv2
+from PIL import Image
 
 from torchvision import models
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision.transforms as transforms
 
-from data.dataloader import get_dataloaders
+from data.dataloader import get_dataloaders, CustomRandomCrop
 from data.dataset import CAPTCHA_MultiTask, CAPTCHA_SingleTask
 
 import pdb
@@ -56,6 +58,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
         print("\nEpoch {}/{}".format(epoch + 1, num_epochs))
         print("----------")
 
+        # in every epoch, train once then evaluate with validation set
         for phase in ["train", "valid"]:
             if phase == "train":
                 model.train()
@@ -65,6 +68,8 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
             running_loss = 0.0
             running_corrects = 0
 
+            # run through train/validation set examples.
+            # If train, update gradients. If validation, run evaluation
             for inputs, labels in dataloaders[phase]:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
@@ -72,23 +77,24 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == "train"):
                     outputs = model(inputs)
+                    pdb.set_trace()
                     loss = criterion(outputs, labels.squeeze(1))
                     _, preds = torch.max(outputs, 1)
 
                     if phase == "train":
                         loss.backward()
                         optimizer.step()
-
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
-                epoch_loss = running_loss / len(dataloaders[phase].dataset)
-                epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+                running_corrects += torch.sum(preds == labels.squeeze(1))
 
                 if phase == "valid":
                     val_acc_history.append(epoch_acc)
                     if epoch_acc > best_acc:
                         best_acc = epoch_acc
                         best_model_params = copy.deepcopy(model.state_dict())
+
+            epoch_loss = running_loss / len(dataloaders[phase].dataset)
+            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
             print(
                 "{} - Loss: {:.4f} \t Acc: {:.4f}".format(phase, epoch_loss, epoch_acc)
             )
@@ -152,7 +158,12 @@ class MultiTaskFinalLayer(nn.Module):
         None
         """
         super(MultiTaskFinalLayer, self).__init__()
-        self.layers = [nn.Linear(512, num_classes) for _ in range(num_tasks)]
+        #self.layers = [nn.Linear(512, num_classes) for _ in range(num_tasks)]
+        self.layers = nn.ModuleList()
+        for i in range(num_tasks):
+            self.layers.append(
+                nn.Linear(512, num_classes)
+            )
         
     def forward(self, x):
         """ Forward pass over final layer.
@@ -166,7 +177,10 @@ class MultiTaskFinalLayer(nn.Module):
         outputs
             list, list of class probabilities for each task
         """
-        outputs = [task_layer(x) for task_layer in self.layers]
+        #outputs = [task_layer(x) for task_layer in self.layers]
+        outputs = []
+        for task_layer in self.layers:
+            outputs.append(task_layer(x))
         return outputs
 
 
@@ -204,7 +218,6 @@ def get_resnet(num_classes, task_type, num_tasks, device="cpu"):
         model.fc = MultiTaskFinalLayer(num_classes, num_tasks)
     else:
         raise ValueError("Not a valid task type.")
-
     model = model.to(device)
 
     params_to_update = [
@@ -214,55 +227,53 @@ def get_resnet(num_classes, task_type, num_tasks, device="cpu"):
     return model, params_to_update
 
 
-def get_team_predictions(model, team_dataloader, encoder):
+def get_test_predictions(model, test_dataloader, encoder):
     """
-    Given a model and a dataloader, predicts the players present in a team.
+    Obtain predictions for the test set
 
     Parameters
     ----------
     model
         model, trained model
-    team_dataloader
-        DataLoader, dataloader containing images of only one team
+    test_dataloader
+        DataLoader, dataloader of the test set
     encoder
-        LabelEncoder, encoder used to turn champion names into integers
+        LabelEncoder, encoder used to turn CAPTCHA characters into integer labels.
 
     Returns
     -------
-    names_predicted
-        list, names of the predicted champions
+    captcha_chars
+        list, predicted CAPTCHA characters
     """
-    predictions = []
+    predicted_chars = []
     model.eval()
-    for inputs, _ in team_dataloader:
-        preds = nn.LogSoftmax(dim=1)(model(inputs)).detach().numpy()
-        pred = np.argmax(preds)
-        predictions.append(pred)
+    running_corrects = 0
+    for inputs, labels in test_dataloader:
+        outputs = model(inputs)
+        _, preds = torch.max(outputs, 1)
+        captcha_chars = encoder.inverse_transform(np.array(preds).ravel())
+        _ = [predicted_chars.append(c) for c in captcha_chars]
+        running_corrects += torch.sum(preds == labels.squeeze(1))
+    
+    acc = running_corrects.double() / len(test_dataloader.dataset)
 
-    names_predicted = encoder.inverse_transform(predictions)
-    return list(names_predicted)
+    return list(predicted_chars), acc
+
+
 
 
 def main(config_path):
     # config = json.load(open(config_path, "r"))
-    # game_img_path = config["paths"]["game_image_path"]
-    # champion_folder = config["paths"]["champion_folder"]
-
-    # num_classes = len(os.listdir(champion_folder))
-    # num_epochs = config["dl"]["epochs"]
-    # learning_rate = config["dl"]["learning_rate"]
-    # momentum = config["dl"]["momentum"]
-    # batch_size = config["dl"]["batch_size"]
 
     # hyperparameters
-    task_type = 'single'
+    task_type = 'multi'
     data_root='/Users/oh761139/Documents/code/mtl_data/CAPTCHA/samples'
     batch_size = 16
     random_seed = 42
     shuffle = True
-    val_split = 0.2
-    test_split = 0.2
-    learning_rate = 1e-4
+    val_split = 0.1
+    test_split = 0.1
+    learning_rate = 1e-3
     momentum = 0.9
     num_epochs = 2
     ####
@@ -270,15 +281,24 @@ def main(config_path):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+    # transformations for data augmentation
+    transform = transforms.Compose([
+        CustomRandomCrop(180),
+        transforms.RandomRotation(10, resample=Image.BILINEAR),
+        transforms.Resize([50,200]),
+        transforms.ToTensor(),
+    ])
+
     # assign datasets
     if task_type.lower() == 'single':
-        dataset = CAPTCHA_SingleTask(data_root, transform=None, char_place=0)
+        dataset = CAPTCHA_SingleTask(data_root, transform=transform, char_place=0)
     elif task_type.lower() == 'multi':
-        dataset = CAPTCHA_MultiTask(data_root, transform=None)
+        dataset = CAPTCHA_MultiTask(data_root, transform=transform)
     else:
         raise ValueError("Not a valid task type.")
     num_classes = dataset.get_num_classes()
     num_tasks = dataset.get_num_tasks()
+    encoder = dataset.get_encoder()
         
 
     # get dataloaders
@@ -298,29 +318,19 @@ def main(config_path):
     # load in Resnet-18 model
     model, params_to_update = get_resnet(num_classes, task_type, num_tasks, device)
 
-    optimizer = optim.SGD(params_to_update, lr=learning_rate, momentum=momentum)
-    #optimizer = optim.Adam(params_to_update, lr=learning_rate)
-    criterion = nn.CrossEntropyLoss()
+    #optimizer = optim.SGD(params_to_update, lr=learning_rate, momentum=momentum)
+    optimizer = optim.Adam(params_to_update, lr=learning_rate)
+    criterion = nn.CrossEntropyLoss(reduction='sum')
 
     # train model
     model, val_acc_history = train_model(
         model, dataloaders, criterion, optimizer, num_epochs=num_epochs, device=device
     )
-    pdb.set_trace()
-    # get team predictions
-    left_dataloader, left_true_labels = get_valid_dataloader(
-        encoder, data_path=game_img_path, team="left", batch_size=1, shuffle=False
-    )
-    right_dataloader, right_true_labels = get_valid_dataloader(
-        encoder, data_path=game_img_path, team="right", batch_size=1, shuffle=False
-    )
-    left_players = get_team_predictions(model, left_dataloader, encoder)
-    right_players = get_team_predictions(model, right_dataloader, encoder)
 
-    print("Left team members are predicted as: \n {}\n".format(left_players))
-    print("Actual feft team members are: \n {}\n\n".format(left_true_labels))
-    print("Right team members are predicted as: \n {}\n".format(right_players))
-    print("Actual right team members are: \n {}\n".format(right_true_labels))
+    # get team predictions
+    test_chars, test_acc = get_test_predictions(model, test_dataloader, encoder)
+
+    pdb.set_trace()
 
 
 if __name__ == "__main__":
