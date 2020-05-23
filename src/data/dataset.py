@@ -60,7 +60,8 @@ class CAPTCHA_MultiTask(Dataset):
             self.transform = transforms.Compose([transforms.ToTensor()])
 
         path, label = self.image_paths[idx]
-        encoded_label = np.array([self.encoder.transform([letter]) for letter in label])
+        #encoded_label = np.array([self.encoder.transform([letter]) for letter in label])
+        encoded_label = self.encoder.transform(list(label))
         image = Image.open(path).convert("RGB")
         image = self.transform(image)
 
@@ -150,7 +151,7 @@ class CAPTCHA_SingleTask(Dataset):
 
         path, label = self.image_paths[idx]
         label = label[self.char_place]
-        encoded_label = self.encoder.transform([label])
+        encoded_label = self.encoder.transform([label])[0]
         image = Image.open(path).convert("RGB")
         image = self.transform(image)
 

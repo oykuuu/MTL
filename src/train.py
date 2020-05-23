@@ -14,12 +14,25 @@ from torchvision import models
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.autograd import Variable
 import torchvision.transforms as transforms
 
 from data.dataloader import get_dataloaders, CustomRandomCrop
 from data.dataset import CAPTCHA_MultiTask, CAPTCHA_SingleTask
 
 import pdb
+
+
+def get_max_from_list(outputs):
+    if outputs.dim() == 2:
+        _, flat_preds = torch.max(outputs, 1)
+    elif outputs.dim() == 3:
+        # if outputs dimension is 3, this was a multi-task learning
+        flat_preds = torch.stack([torch.max(task_outputs, 1)[1] for task_outputs in outputs])
+    else:
+        raise ValueError("Dimension of the output must be 2 or 3.")
+
+    return flat_preds
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device="cpu"):
     """
@@ -55,8 +68,9 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
     best_acc = 0.0
 
     for epoch in range(num_epochs):
-        print("\nEpoch {}/{}".format(epoch + 1, num_epochs))
-        print("----------")
+        epoch_message = "\nEpoch {}/{}".format(epoch + 1, num_epochs)
+        print(epoch_message)
+        print("-" * len(epoch_message))
 
         # in every epoch, train once then evaluate with validation set
         for phase in ["train", "valid"]:
@@ -77,15 +91,14 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == "train"):
                     outputs = model(inputs)
-                    pdb.set_trace()
-                    loss = criterion(outputs, labels.squeeze(1))
-                    _, preds = torch.max(outputs, 1)
+                    loss = criterion(outputs, labels)
+                    preds = get_max_from_list(outputs)
 
                     if phase == "train":
                         loss.backward()
                         optimizer.step()
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.squeeze(1))
+                running_corrects += torch.sum(preds == labels)
 
                 if phase == "valid":
                     val_acc_history.append(epoch_acc)
@@ -174,14 +187,18 @@ class MultiTaskFinalLayer(nn.Module):
             tensor, output of the ResNet just before the final layer.
         Returns
         -------
-        outputs
-            list, list of class probabilities for each task
+        tensor_outputs
+            tensor, list of class probabilities for each task
         """
         #outputs = [task_layer(x) for task_layer in self.layers]
         outputs = []
         for task_layer in self.layers:
             outputs.append(task_layer(x))
-        return outputs
+
+        # Arrange the outputs into a tensor such that the size is
+        # Batch size x Task number x Class number
+        tensor_outputs = torch.stack(outputs).permute(1, 0, 2)
+        return tensor_outputs
 
 
 def get_resnet(num_classes, task_type, num_tasks, device="cpu"):
@@ -250,15 +267,37 @@ def get_test_predictions(model, test_dataloader, encoder):
     running_corrects = 0
     for inputs, labels in test_dataloader:
         outputs = model(inputs)
-        _, preds = torch.max(outputs, 1)
+        preds = get_max_from_list(outputs)
         captcha_chars = encoder.inverse_transform(np.array(preds).ravel())
         _ = [predicted_chars.append(c) for c in captcha_chars]
         running_corrects += torch.sum(preds == labels.squeeze(1))
     
     acc = running_corrects.double() / len(test_dataloader.dataset)
 
-    return list(predicted_chars), acc
+    print('\nTest accuracy: {}'.format(acc))
+    return predicted_chars, acc
 
+
+class UniformLinearLoss(torch.nn.Module):
+    """ Uniformly averaging of all task loss where the task loss
+    is the Cross Entropy Loss.
+    """
+    def __init__(self, num_tasks):
+        super(UniformLinearLoss, self).__init__()
+        self.num_tasks = num_tasks
+        self.criterions = [nn.CrossEntropyLoss(reduction='sum') for _ in range(num_tasks)]
+        
+    def forward(self, outputs, labels):
+        outputs_np = np.array([task_output.detach().numpy() for task_output in outputs])
+        task_losses = torch.tensor(0.)
+        for task in range(self.num_tasks):
+            task_output = outputs_np[:, task, :]
+            task_label = labels[:, task]
+            criterion = self.criterions[task]
+            task_losses += (1. / self.num_tasks) * criterion(torch.from_numpy(task_output), task_label)
+
+        task_losses = Variable(task_losses, requires_grad = True)
+        return task_losses
 
 
 
@@ -273,13 +312,14 @@ def main(config_path):
     shuffle = True
     val_split = 0.1
     test_split = 0.1
-    learning_rate = 1e-3
+    learning_rate = 1e-4
     momentum = 0.9
-    num_epochs = 2
+    num_epochs = 12
     ####
 
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print("Using device {}\n".format(device))
 
     # transformations for data augmentation
     transform = transforms.Compose([
@@ -299,6 +339,10 @@ def main(config_path):
     num_classes = dataset.get_num_classes()
     num_tasks = dataset.get_num_tasks()
     encoder = dataset.get_encoder()
+
+    # assign loss function
+    criterion = UniformLinearLoss(num_tasks)
+    #criterion = nn.CrossEntropyLoss(reduction='sum')
         
 
     # get dataloaders
@@ -320,7 +364,6 @@ def main(config_path):
 
     #optimizer = optim.SGD(params_to_update, lr=learning_rate, momentum=momentum)
     optimizer = optim.Adam(params_to_update, lr=learning_rate)
-    criterion = nn.CrossEntropyLoss(reduction='sum')
 
     # train model
     model, val_acc_history = train_model(
