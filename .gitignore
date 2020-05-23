@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+data/__pycache__/
 *.py[cod]
 *.pyc
 *.pyo
@@ -50,3 +51,6 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+
+# Jupyter
+.ipynb_checkpoints/
