@@ -21,58 +21,14 @@ import torchvision.transforms as transforms
 
 from data.dataloader import get_dataloaders, CustomRandomCrop
 from data.dataset import CAPTCHA_MultiTask, CAPTCHA_SingleTask
+from models.multi_task import MultiTaskFinalLayer
+from models.single_task import SingleTaskFinalLayer
+from utils.utils import get_loss, get_max_from_list, plot_grad_flow
 
 import pdb
 
-def plot_grad_flow(named_parameters):
-    """ Sanity checks of gradient updates in backprop.
 
-    Parameters
-    ----------
-    named_parameters
-        parameters to be updated
-
-    Returns
-    -------
-    None
-    """
-
-    ave_grads = []
-    max_grads = []
-    layers = []
-
-    for n, p in named_parameters:
-        if(p.requires_grad) and ("bias" not in n):
-            layers.append(n)
-            ave_grads.append(p.grad.abs().mean())
-            max_grads.append(p.grad.abs().max())
-    plt.plot(ave_grads, alpha=0.3, color="b")
-    plt.hlines(0, 0, len(ave_grads)+1, linewidth=1, color="k" )
-    plt.xticks(range(0,len(ave_grads), 1), layers, rotation=30)
-    plt.xlim(xmin=0, xmax=len(ave_grads))
-    plt.xlabel("Layers")
-    plt.ylabel("average gradient")
-    plt.title("Gradient flow")
-    plt.grid(True)
-    
-
-
-def get_max_from_list(outputs):
-    if isinstance(outputs, list):
-        flat_preds = torch.stack([torch.max(task_outputs, 1)[1] for task_outputs in outputs])
-        return flat_preds.T
-    if outputs.dim() == 2:
-        _, flat_preds = torch.max(outputs, 1)
-    elif outputs.dim() == 3:
-        # if outputs dimension is 3, this was a multi-task learning
-        flat_preds = torch.stack([torch.max(task_outputs, 1)[1] for task_outputs in outputs])
-    else:
-        raise ValueError("Dimension of the output must be 2 or 3.")
-
-    return flat_preds
-
-
-def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device="cpu"):
+def train_model(model, dataloaders, criterion, alphas, optimizer, num_epochs=10, device="cpu", num_tasks=1):
     """
     Trains the Deep Learning model. Keeps track of the best model according to the
     holdout validation set.
@@ -85,12 +41,16 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
         dict, dictionary of PyTorch DataLoader for train and validation set
     criterion
         nn.criterion, loss function used in optimization
+    alphas
+        list, weights in the linear combination of loss functions
     optimizer
         nn.optim, method for converging to the optimal value
     num_epochs
         int, number of epochs to train for
     device
         string, set to 'gpu' if available
+    num_tasks
+        int, number of tasks
 
     Returns
     -------
@@ -129,17 +89,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(phase == "train"):
                     outputs = model(inputs)
-                    #loss = criterion(outputs, labels)
-
-                    loss1 = criterion[0](outputs[:, 0, :], labels[:, 0])
-                    loss2 = criterion[1](outputs[:, 1, :], labels[:, 1])
-                    loss3 = criterion[2](outputs[:, 2, :], labels[:, 2])
-                    loss4 = criterion[3](outputs[:, 3, :], labels[:, 3])
-                    loss5 = criterion[4](outputs[:, 4, :], labels[:, 4])
-                    loss = loss1 + loss2 + loss3 + loss4 + loss5
-
-
-                    
+                    loss = get_loss(criterion, outputs, labels, alphas)
                     preds = get_max_from_list(outputs)
 
                     if phase == "train":
@@ -147,7 +97,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
                         plot_grad_flow(model.named_parameters())
                         optimizer.step()
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels) # torch.tensor(0)
+                running_corrects += torch.sum(preds == labels)
 
                 if phase == "valid":
                     val_acc_history.append(epoch_acc)
@@ -156,7 +106,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
                         best_model_params = copy.deepcopy(model.state_dict())
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+            epoch_acc = running_corrects.double() / (len(dataloaders[phase].dataset) * num_tasks)
             print(
                 "{} - Loss: {:.4f} \t Acc: {:.4f}".format(phase, epoch_loss, epoch_acc)
             )
@@ -174,169 +124,10 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=10, device=
     return model, val_acc_history
 
 
-class SingleTaskFinalLayer(nn.Module):
-    """ In the case of single task learning, determines the final layer of ResNet.
+def construct_model(num_classes, task_type, num_tasks, device="cpu"):
     """
-    def __init__(self, num_classes):
-        """ Initialize a single linear layer.
-
-        Parameters
-        ----------
-        num_classes
-            int, number of classes
-        Returns
-        -------
-        None
-        """
-        super(SingleTaskFinalLayer, self).__init__()
-        self.layer = nn.Linear(512, num_classes)
-        
-    def forward(self, x):
-        """ Forward pass over final layer.
-
-        Parameters
-        ----------
-        x
-            tensor, output of the ResNet just before the final layer.
-        Returns
-        -------
-        output
-            tensor, class probabilities
-        """
-        output = F.softmax(self.layer(x), dim=1)
-        return output
-
-
-# class MultiTaskFinalLayer(nn.Module):
-#     """ In the case of multi-task learning, determines the final layer of ResNet.
-#     """
-#     def __init__(self, resnet_base, num_classes, num_tasks):
-#         """ Initialize final linear layers for each task.
-
-#         Parameters
-#         ----------
-#         num_classes
-#             int, number of classes
-#         Returns
-#         -------
-#         None
-#         """
-#         super(MultiTaskFinalLayer, self).__init__()
-#         self.resnet_base = resnet_base
-
-#         # resnet.fc was replaced with Linear (512, 256)
-#         # so self.bn1 is for that linear layer
-#         self.bn1 = nn.BatchNorm1d(256, eps = 2e-1)
-#         self.x2 =  nn.Linear(256, 256)
-#         nn.init.xavier_normal_(self.x2.weight)
-#         self.bn2 = nn.BatchNorm1d(256, eps = 2e-1)
-        
-#         self.task1 = nn.Linear(256, num_classes)
-#         nn.init.xavier_normal_(self.task1.weight)
-#         self.task2 = nn.Linear(256, num_classes)
-#         nn.init.xavier_normal_(self.task2.weight)
-#         self.task3 = nn.Linear(256, num_classes)
-#         nn.init.xavier_normal_(self.task3.weight)
-#         self.task4 = nn.Linear(256, num_classes)
-#         nn.init.xavier_normal_(self.task4.weight)
-#         self.task5 = nn.Linear(256, num_classes)
-#         nn.init.xavier_normal_(self.task5.weight) 
-
-        
-#     def forward(self, x):
-#         """ Forward pass over final layer.
-
-#         Parameters
-#         ----------
-#         x
-#             tensor, output of the ResNet just before the final layer.
-#         Returns
-#         -------
-#         tensor_outputs
-#             tensor, list of class probabilities for each task
-#         """
-#         base = self.resnet_base(x)
-#         base = self.bn1(base)
-#         base = self.bn2(self.x2(base))
-
-#         task1_out = F.softmax(self.task1(base), dim=1)
-#         task2_out = F.softmax(self.task2(base), dim=1)
-#         task3_out = F.softmax(self.task3(base), dim=1)
-#         task4_out = F.softmax(self.task4(base), dim=1)
-#         task5_out = F.softmax(self.task5(base), dim=1)
-
-
-#         # Arrange the outputs into a tensor such that the size is
-#         # Batch size x Task number x Class number
-#         outputs = [task1_out, task2_out, task3_out, task4_out, task5_out]
-#         tensor_outputs = torch.stack(outputs).permute(1, 0, 2)
-#         return tensor_outputs
-
-
-class MultiTaskFinalLayer(nn.Module):
-    """ In the case of multi-task learning, determines the final layer of ResNet.
-    """
-    def __init__(self, resnet_base, num_classes, num_tasks):
-        """ Initialize final linear layers for each task.
-
-        Parameters
-        ----------
-        num_classes
-            int, number of classes
-        Returns
-        -------
-        None
-        """
-        super(MultiTaskFinalLayer, self).__init__()
-        self.num_tasks = num_tasks
-        self.resnet_base = resnet_base
-
-        # resnet.fc was replaced with Linear (512, 256)
-        # so self.bn1 is for that linear layer
-        self.bn1 = nn.BatchNorm1d(256, eps = 2e-1)
-        self.x2 =  nn.Linear(256, 256)
-        nn.init.xavier_normal_(self.x2.weight)
-        self.bn2 = nn.BatchNorm1d(256, eps = 2e-1)
-        
-        self.sequence = nn.Sequential()
-        for i in range(num_tasks):
-            task_name = "task_" + str(i)
-            task_layer = nn.Linear(256, num_classes)
-            nn.init.xavier_normal_(task_layer.weight)
-            self.sequence.add_module(task_name, task_layer)
-
-        
-    def forward(self, x):
-        """ Forward pass over final layer.
-
-        Parameters
-        ----------
-        x
-            tensor, output of the ResNet just before the final layer.
-        Returns
-        -------
-        tensor_outputs
-            tensor, list of class probabilities for each task
-        """
-        base = self.resnet_base(x)
-        base = self.bn1(base)
-        base = self.bn2(self.x2(base))
-
-        outputs = []
-        for i in range(self.num_tasks):
-            outputs.append(F.softmax((self.sequence[i](base)), dim=1))
-
-        # Arrange the outputs into a tensor such that the size is
-        # Batch size x Task number x Class number
-        tensor_outputs = torch.stack(outputs).permute(1, 0, 2)
-
-        return tensor_outputs
-
-
-def get_resnet(num_classes, task_type, num_tasks, device="cpu"):
-    """
-    Obtain the pretrained Resnet-18 model and allow for the training of
-    the last layer only.
+    Obtain the pretrained Resnet-18 model and replace the last layer
+    accordingly for single or multi task learnings.
 
     Parameters
     ----------
@@ -377,7 +168,7 @@ def get_resnet(num_classes, task_type, num_tasks, device="cpu"):
     return model, params_to_update
 
 
-def get_test_predictions(model, test_dataloader, encoder):
+def get_test_predictions(model, test_dataloader, encoder, num_tasks):
     """
     Obtain predictions for the test set
 
@@ -405,33 +196,10 @@ def get_test_predictions(model, test_dataloader, encoder):
         _ = [predicted_chars.append(c) for c in captcha_chars]
         running_corrects += torch.sum(preds == labels.squeeze(1))
     
-    acc = running_corrects.double() / len(test_dataloader.dataset)
+    acc = running_corrects.double() / (len(test_dataloader.dataset) * num_tasks)
 
     print('\nTest accuracy: {}'.format(acc))
     return predicted_chars, acc
-
-
-class UniformLinearLoss(torch.nn.Module):
-    """ Uniformly averaging of all task loss where the task loss
-    is the Cross Entropy Loss.
-    """
-    def __init__(self, num_tasks):
-        super(UniformLinearLoss, self).__init__()
-        self.num_tasks = num_tasks
-        self.criterions = [nn.CrossEntropyLoss(reduction='sum') for _ in range(num_tasks)]
-        
-    def forward(self, outputs, labels):
-        outputs_np = np.array([task_output.detach().numpy() for task_output in outputs])
-        task_losses = torch.tensor(0.)
-        for task in range(self.num_tasks):
-            task_output = outputs_np[:, task, :]
-            task_label = labels[:, task]
-            criterion = self.criterions[task]
-            task_losses += criterion(torch.from_numpy(task_output), task_label)
-
-        task_losses = Variable(task_losses, requires_grad = True)
-        return task_losses
-
 
 
 def main(config_path):
@@ -474,15 +242,8 @@ def main(config_path):
     encoder = dataset.get_encoder()
 
     # assign loss function
-    #criterion = UniformLinearLoss(num_tasks)
-    #criterion = nn.CrossEntropyLoss(reduction='sum')
-    criterion = [
-        nn.CrossEntropyLoss(reduction='sum'),
-        nn.CrossEntropyLoss(reduction='sum'),
-        nn.CrossEntropyLoss(reduction='sum'),
-        nn.CrossEntropyLoss(reduction='sum'),
-        nn.CrossEntropyLoss(reduction='sum'),
-    ]
+    criterion = [nn.CrossEntropyLoss(reduction='sum')] * num_tasks
+    alphas = np.ones([num_tasks]) / num_tasks
 
     # get dataloaders
     train_dataloader, valid_dataloader, test_dataloader = get_dataloaders(
@@ -499,14 +260,14 @@ def main(config_path):
     dataloaders["valid"] = valid_dataloader
 
     # load in Resnet-18 model
-    model, params_to_update = get_resnet(num_classes, task_type, num_tasks, device)
+    model, params_to_update = construct_model(num_classes, task_type, num_tasks, device)
 
     #optimizer = optim.SGD(params_to_update, lr=learning_rate, momentum=momentum)
     optimizer = optim.Adam(params_to_update, lr=learning_rate)
 
     # train model
     model, val_acc_history = train_model(
-        model, dataloaders, criterion, optimizer, num_epochs=num_epochs, device=device
+        model, dataloaders, criterion, alphas, optimizer, num_epochs=num_epochs, device=device, num_tasks=num_tasks
     )
 
     # plot the gradients for sanity check
@@ -514,7 +275,7 @@ def main(config_path):
     plt.show()
 
     # get predictions
-    test_chars, test_acc = get_test_predictions(model, test_dataloader, encoder)
+    test_chars, test_acc = get_test_predictions(model, test_dataloader, encoder, num_tasks)
 
     pdb.set_trace()
 
