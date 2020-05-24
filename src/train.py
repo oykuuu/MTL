@@ -200,10 +200,77 @@ class SingleTaskFinalLayer(nn.Module):
             tensor, output of the ResNet just before the final layer.
         Returns
         -------
-        self.layer(x)
+        output
             tensor, class probabilities
         """
-        return self.layer(x)
+        output = F.softmax(self.layer(x), dim=1)
+        return output
+
+
+# class MultiTaskFinalLayer(nn.Module):
+#     """ In the case of multi-task learning, determines the final layer of ResNet.
+#     """
+#     def __init__(self, resnet_base, num_classes, num_tasks):
+#         """ Initialize final linear layers for each task.
+
+#         Parameters
+#         ----------
+#         num_classes
+#             int, number of classes
+#         Returns
+#         -------
+#         None
+#         """
+#         super(MultiTaskFinalLayer, self).__init__()
+#         self.resnet_base = resnet_base
+
+#         # resnet.fc was replaced with Linear (512, 256)
+#         # so self.bn1 is for that linear layer
+#         self.bn1 = nn.BatchNorm1d(256, eps = 2e-1)
+#         self.x2 =  nn.Linear(256, 256)
+#         nn.init.xavier_normal_(self.x2.weight)
+#         self.bn2 = nn.BatchNorm1d(256, eps = 2e-1)
+        
+#         self.task1 = nn.Linear(256, num_classes)
+#         nn.init.xavier_normal_(self.task1.weight)
+#         self.task2 = nn.Linear(256, num_classes)
+#         nn.init.xavier_normal_(self.task2.weight)
+#         self.task3 = nn.Linear(256, num_classes)
+#         nn.init.xavier_normal_(self.task3.weight)
+#         self.task4 = nn.Linear(256, num_classes)
+#         nn.init.xavier_normal_(self.task4.weight)
+#         self.task5 = nn.Linear(256, num_classes)
+#         nn.init.xavier_normal_(self.task5.weight) 
+
+        
+#     def forward(self, x):
+#         """ Forward pass over final layer.
+
+#         Parameters
+#         ----------
+#         x
+#             tensor, output of the ResNet just before the final layer.
+#         Returns
+#         -------
+#         tensor_outputs
+#             tensor, list of class probabilities for each task
+#         """
+#         base = self.resnet_base(x)
+#         base = self.bn1(base)
+#         base = self.bn2(self.x2(base))
+
+#         task1_out = F.softmax(self.task1(base), dim=1)
+#         task2_out = F.softmax(self.task2(base), dim=1)
+#         task3_out = F.softmax(self.task3(base), dim=1)
+#         task4_out = F.softmax(self.task4(base), dim=1)
+#         task5_out = F.softmax(self.task5(base), dim=1)
+
+
+#         # Arrange the outputs into a tensor such that the size is
+#         # Batch size x Task number x Class number
+#         outputs = [task1_out, task2_out, task3_out, task4_out, task5_out]
+#         tensor_outputs = torch.stack(outputs).permute(1, 0, 2)
+#         return tensor_outputs
 
 
 class MultiTaskFinalLayer(nn.Module):
@@ -221,6 +288,7 @@ class MultiTaskFinalLayer(nn.Module):
         None
         """
         super(MultiTaskFinalLayer, self).__init__()
+        self.num_tasks = num_tasks
         self.resnet_base = resnet_base
 
         # resnet.fc was replaced with Linear (512, 256)
@@ -230,17 +298,12 @@ class MultiTaskFinalLayer(nn.Module):
         nn.init.xavier_normal_(self.x2.weight)
         self.bn2 = nn.BatchNorm1d(256, eps = 2e-1)
         
-        
-        self.task1 = nn.Linear(256, num_classes)
-        nn.init.xavier_normal_(self.task1.weight)
-        self.task2 = nn.Linear(256, num_classes)
-        nn.init.xavier_normal_(self.task2.weight)
-        self.task3 = nn.Linear(256, num_classes)
-        nn.init.xavier_normal_(self.task3.weight)
-        self.task4 = nn.Linear(256, num_classes)
-        nn.init.xavier_normal_(self.task4.weight)
-        self.task5 = nn.Linear(256, num_classes)
-        nn.init.xavier_normal_(self.task5.weight) 
+        self.sequence = nn.Sequential()
+        for i in range(num_tasks):
+            task_name = "task_" + str(i)
+            task_layer = nn.Linear(256, num_classes)
+            nn.init.xavier_normal_(task_layer.weight)
+            self.sequence.add_module(task_name, task_layer)
 
         
     def forward(self, x):
@@ -259,18 +322,16 @@ class MultiTaskFinalLayer(nn.Module):
         base = self.bn1(base)
         base = self.bn2(self.x2(base))
 
-        task1_out = F.softmax(self.task1(base), dim=1)
-        task2_out = F.softmax(self.task2(base), dim=1)
-        task3_out = F.softmax(self.task3(base), dim=1)
-        task4_out = F.softmax(self.task4(base), dim=1)
-        task5_out = F.softmax(self.task5(base), dim=1)
-
+        outputs = []
+        for i in range(self.num_tasks):
+            outputs.append(F.softmax((self.sequence[i](base)), dim=1))
 
         # Arrange the outputs into a tensor such that the size is
         # Batch size x Task number x Class number
-        outputs = [task1_out, task2_out, task3_out, task4_out, task5_out]
         tensor_outputs = torch.stack(outputs).permute(1, 0, 2)
+
         return tensor_outputs
+
 
 def get_resnet(num_classes, task_type, num_tasks, device="cpu"):
     """
