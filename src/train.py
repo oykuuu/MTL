@@ -203,21 +203,20 @@ def get_test_predictions(model, test_dataloader, encoder, num_tasks):
 
 
 def main(config_path):
-    # config = json.load(open(config_path, "r"))
+ 
+    config = json.load(open(config_path, "r"))
 
     # hyperparameters
-    task_type = 'multi'
-    data_root='/Users/oh761139/Documents/code/mtl_data/CAPTCHA/samples'
-    batch_size = 16
-    random_seed = 42
-    shuffle = True
-    val_split = 0.1
-    test_split = 0.1
-    learning_rate = 1e-3
-    momentum = 0.9
-    num_epochs = 10
-    ####
-
+    data_root = config['paths']['data_root']
+    task_type = config['training']['task_type']
+    batch_size = config['training']['batch_size']
+    random_seed = config['training']['random_seed']
+    shuffle = config['training']['shuffle']
+    val_split = config['training']['val_split']
+    test_split = config['training']['test_split']
+    learning_rate = config['training']['learning_rate']
+    momentum = config['training']['momentum']
+    num_epochs = config['training']['num_epochs']
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("Using device {}\n".format(device))
