@@ -2,9 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class SingleTaskFinalLayer(nn.Module):
     """ In the case of single task learning, determines the final layer of ResNet.
     """
+
     def __init__(self, num_classes):
         """ Initialize a single linear layer.
 
@@ -18,7 +20,7 @@ class SingleTaskFinalLayer(nn.Module):
         """
         super(SingleTaskFinalLayer, self).__init__()
         self.layer = nn.Linear(512, num_classes)
-        
+
     def forward(self, x):
         """ Forward pass over final layer.
 

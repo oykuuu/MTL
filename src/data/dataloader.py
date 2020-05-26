@@ -44,7 +44,7 @@ class CustomRandomCrop(object):
         if np.random.random() > 0.5:
             image = image.crop((crop_by, 0, w, h))
         else:
-            image = image.crop((0, 0, w-crop_by, h))
+            image = image.crop((0, 0, w - crop_by, h))
 
         return image
 
@@ -58,7 +58,11 @@ def get_dataloaders(
     test_split: float = 0.2,
     num_workers: int = 4,
     pin_memory: bool = False,
-) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+) -> Tuple[
+    torch.utils.data.DataLoader,
+    torch.utils.data.DataLoader,
+    torch.utils.data.DataLoader,
+]:
 
     """
     Function for loading and splitting data for training, validation, test for CAPTCHA
@@ -100,7 +104,9 @@ def get_dataloaders(
     n_val = int(np.floor(val_split * n_data))
     train_val, test_dataset = random_split(dataset, [n_data - n_test, n_test])
 
-    train_dataset, val_dataset = random_split(train_val, [len(train_val) - n_val, n_val])
+    train_dataset, val_dataset = random_split(
+        train_val, [len(train_val) - n_val, n_val]
+    )
 
     # initialize all dataloaders
     train_loader = torch.utils.data.DataLoader(
@@ -129,4 +135,3 @@ def get_dataloaders(
     torch.manual_seed(torch.initial_seed())
 
     return train_loader, val_loader, test_loader
-

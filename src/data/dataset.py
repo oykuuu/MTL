@@ -60,7 +60,7 @@ class CAPTCHA_MultiTask(Dataset):
             self.transform = transforms.Compose([transforms.ToTensor()])
 
         path, label = self.image_paths[idx]
-        #encoded_label = np.array([self.encoder.transform([letter]) for letter in label])
+        # encoded_label = np.array([self.encoder.transform([letter]) for letter in label])
         encoded_label = self.encoder.transform(list(label))
         image = Image.open(path).convert("RGB")
         image = self.transform(image)
@@ -83,7 +83,7 @@ class CAPTCHA_MultiTask(Dataset):
         all_labels = []
         for name in os.listdir(self.data_root):
             label, extension = name.split(".")
-            if not (extension == 'png' or extension == 'jpg'):
+            if not (extension == "png" or extension == "jpg"):
                 continue
             all_labels.append(label)
             self.image_paths += [(os.path.join(self.data_root, name), label)]
@@ -173,7 +173,7 @@ class CAPTCHA_SingleTask(Dataset):
         all_labels = []
         for name in os.listdir(self.data_root):
             label, extension = name.split(".")
-            if not (extension == 'png' or extension == 'jpg'):
+            if not (extension == "png" or extension == "jpg"):
                 continue
             all_labels.append(label)
             self.image_paths += [(os.path.join(self.data_root, name), label)]

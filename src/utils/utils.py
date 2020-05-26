@@ -21,19 +21,19 @@ def plot_grad_flow(named_parameters):
     layers = []
 
     for n, p in named_parameters:
-        if(p.requires_grad) and ("bias" not in n):
+        if (p.requires_grad) and ("bias" not in n):
             layers.append(n)
             ave_grads.append(p.grad.abs().mean())
             max_grads.append(p.grad.abs().max())
     plt.plot(ave_grads, alpha=0.3, color="b")
-    plt.hlines(0, 0, len(ave_grads)+1, linewidth=1, color="k" )
-    plt.xticks(range(0,len(ave_grads), 1), layers, rotation=30)
+    plt.hlines(0, 0, len(ave_grads) + 1, linewidth=1, color="k")
+    plt.xticks(range(0, len(ave_grads), 1), layers, rotation=30)
     plt.xlim(xmin=0, xmax=len(ave_grads))
     plt.xlabel("Layers")
     plt.ylabel("average gradient")
     plt.title("Gradient flow")
     plt.grid(True)
-    
+
 
 def get_max_from_list(outputs):
     """
@@ -54,11 +54,14 @@ def get_max_from_list(outputs):
         _, flat_preds = torch.max(outputs, 1)
     elif outputs.dim() == 3:
         # if outputs dimension is 3, this was a multi-task learning
-        flat_preds = torch.stack([torch.max(task_outputs, 1)[1] for task_outputs in outputs])
+        flat_preds = torch.stack(
+            [torch.max(task_outputs, 1)[1] for task_outputs in outputs]
+        )
     else:
         raise ValueError("Dimension of the output must be 2 or 3.")
 
     return flat_preds
+
 
 def get_loss(criterions, outputs, labels, alphas):
     """
@@ -87,12 +90,11 @@ def get_loss(criterions, outputs, labels, alphas):
         raise ValueError("All alpha values should be non-negative.")
 
     if outputs.dim() == 3:
-        loss = torch.tensor(0.)
+        loss = torch.tensor(0.0)
         for t, alpha in enumerate(alphas):
             loss_ind = criterions[t](outputs[:, t, :], labels[:, t])
             loss += alpha * loss_ind
     elif outputs.dim() == 2:
         loss = criterions[0](outputs, labels)
-    
-    return loss
 
+    return loss

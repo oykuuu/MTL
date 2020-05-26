@@ -28,7 +28,16 @@ from utils.utils import get_loss, get_max_from_list, plot_grad_flow
 import pdb
 
 
-def train_model(model, dataloaders, criterion, alphas, optimizer, num_epochs=10, device="cpu", num_tasks=1):
+def train_model(
+    model,
+    dataloaders,
+    criterion,
+    alphas,
+    optimizer,
+    num_epochs=10,
+    device="cpu",
+    num_tasks=1,
+):
     """
     Trains the Deep Learning model. Keeps track of the best model according to the
     holdout validation set.
@@ -106,7 +115,9 @@ def train_model(model, dataloaders, criterion, alphas, optimizer, num_epochs=10,
                         best_model_params = copy.deepcopy(model.state_dict())
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = running_corrects.double() / (len(dataloaders[phase].dataset) * num_tasks)
+            epoch_acc = running_corrects.double() / (
+                len(dataloaders[phase].dataset) * num_tasks
+            )
             print(
                 "{} - Loss: {:.4f} \t Acc: {:.4f}".format(phase, epoch_loss, epoch_acc)
             )
@@ -195,44 +206,46 @@ def get_test_predictions(model, test_dataloader, encoder, num_tasks):
         captcha_chars = encoder.inverse_transform(np.array(preds).ravel())
         _ = [predicted_chars.append(c) for c in captcha_chars]
         running_corrects += torch.sum(preds == labels.squeeze(1))
-    
+
     acc = running_corrects.double() / (len(test_dataloader.dataset) * num_tasks)
 
-    print('\nTest accuracy: {}'.format(acc))
+    print("\nTest accuracy: {}".format(acc))
     return predicted_chars, acc
 
 
 def main(config_path):
- 
+
     config = json.load(open(config_path, "r"))
 
     # hyperparameters
-    data_root = config['paths']['data_root']
-    task_type = config['training']['task_type']
-    batch_size = config['training']['batch_size']
-    random_seed = config['training']['random_seed']
-    shuffle = config['training']['shuffle']
-    val_split = config['training']['val_split']
-    test_split = config['training']['test_split']
-    learning_rate = config['training']['learning_rate']
-    momentum = config['training']['momentum']
-    num_epochs = config['training']['num_epochs']
+    data_root = config["paths"]["data_root"]
+    task_type = config["training"]["task_type"]
+    batch_size = config["training"]["batch_size"]
+    random_seed = config["training"]["random_seed"]
+    shuffle = config["training"]["shuffle"]
+    val_split = config["training"]["val_split"]
+    test_split = config["training"]["test_split"]
+    learning_rate = config["training"]["learning_rate"]
+    momentum = config["training"]["momentum"]
+    num_epochs = config["training"]["num_epochs"]
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("Using device {}\n".format(device))
 
     # transformations for data augmentation
-    transform = transforms.Compose([
-        CustomRandomCrop(180),
-        transforms.RandomRotation(10, resample=Image.BILINEAR),
-        transforms.Resize([50,200]),
-        transforms.ToTensor(),
-    ])
+    transform = transforms.Compose(
+        [
+            CustomRandomCrop(180),
+            transforms.RandomRotation(10, resample=Image.BILINEAR),
+            transforms.Resize([50, 200]),
+            transforms.ToTensor(),
+        ]
+    )
 
     # assign datasets
-    if task_type.lower() == 'single':
+    if task_type.lower() == "single":
         dataset = CAPTCHA_SingleTask(data_root, transform=transform, char_place=0)
-    elif task_type.lower() == 'multi':
+    elif task_type.lower() == "multi":
         dataset = CAPTCHA_MultiTask(data_root, transform=transform)
     else:
         raise ValueError("Not a valid task type.")
@@ -241,18 +254,13 @@ def main(config_path):
     encoder = dataset.get_encoder()
 
     # assign loss function
-    criterion = [nn.CrossEntropyLoss(reduction='sum')] * num_tasks
+    criterion = [nn.CrossEntropyLoss(reduction="sum")] * num_tasks
     alphas = np.ones([num_tasks]) / num_tasks
 
     # get dataloaders
     train_dataloader, valid_dataloader, test_dataloader = get_dataloaders(
-        dataset,
-        batch_size,
-        random_seed,
-        shuffle,
-        val_split,
-        test_split,
-    ) 
+        dataset, batch_size, random_seed, shuffle, val_split, test_split,
+    )
 
     dataloaders = {}
     dataloaders["train"] = train_dataloader
@@ -261,12 +269,19 @@ def main(config_path):
     # load in Resnet-18 model
     model, params_to_update = construct_model(num_classes, task_type, num_tasks, device)
 
-    #optimizer = optim.SGD(params_to_update, lr=learning_rate, momentum=momentum)
+    # optimizer = optim.SGD(params_to_update, lr=learning_rate, momentum=momentum)
     optimizer = optim.Adam(params_to_update, lr=learning_rate)
 
     # train model
     model, val_acc_history = train_model(
-        model, dataloaders, criterion, alphas, optimizer, num_epochs=num_epochs, device=device, num_tasks=num_tasks
+        model,
+        dataloaders,
+        criterion,
+        alphas,
+        optimizer,
+        num_epochs=num_epochs,
+        device=device,
+        num_tasks=num_tasks,
     )
 
     # plot the gradients for sanity check
@@ -274,7 +289,9 @@ def main(config_path):
     plt.show()
 
     # get predictions
-    test_chars, test_acc = get_test_predictions(model, test_dataloader, encoder, num_tasks)
+    test_chars, test_acc = get_test_predictions(
+        model, test_dataloader, encoder, num_tasks
+    )
 
     pdb.set_trace()
 

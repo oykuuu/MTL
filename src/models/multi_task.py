@@ -2,9 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class MultiTaskFinalLayer(nn.Module):
     """ In the case of multi-task learning, determines the final layer of ResNet.
     """
+
     def __init__(self, resnet_base, num_classes, num_tasks):
         """ Initialize final linear layers for each task.
 
@@ -22,11 +24,11 @@ class MultiTaskFinalLayer(nn.Module):
 
         # resnet.fc was replaced with Linear (512, 256)
         # so self.bn1 is for that linear layer
-        self.bn1 = nn.BatchNorm1d(256, eps = 2e-1)
-        self.x2 =  nn.Linear(256, 256)
+        self.bn1 = nn.BatchNorm1d(256, eps=2e-1)
+        self.x2 = nn.Linear(256, 256)
         nn.init.xavier_normal_(self.x2.weight)
-        self.bn2 = nn.BatchNorm1d(256, eps = 2e-1)
-        
+        self.bn2 = nn.BatchNorm1d(256, eps=2e-1)
+
         self.sequence = nn.Sequential()
         for i in range(num_tasks):
             task_name = "task_" + str(i)
@@ -34,7 +36,6 @@ class MultiTaskFinalLayer(nn.Module):
             nn.init.xavier_normal_(task_layer.weight)
             self.sequence.add_module(task_name, task_layer)
 
-        
     def forward(self, x):
         """ Forward pass over final layer.
 
@@ -60,4 +61,3 @@ class MultiTaskFinalLayer(nn.Module):
         tensor_outputs = torch.stack(outputs).permute(1, 0, 2)
 
         return tensor_outputs
-
