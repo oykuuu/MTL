@@ -1,5 +1,5 @@
 # MTL
-Multi Task Learning with MGDA - UP described in [Sener et al's 2019 paper!](https://arxiv.org/pdf/1810.04650.pdf)
+Multi Task Learning with MGDA - UP described in [Sener et al's 2019 paper](https://arxiv.org/pdf/1810.04650.pdf).
 
 **Disclaimer:** So far, only the MTL with linear proxy task loss and Single Task training options are implemented.
 
